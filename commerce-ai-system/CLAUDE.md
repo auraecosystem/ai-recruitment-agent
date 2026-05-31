@@ -1,4 +1,400 @@
-Alright — now we turn everything into a **real deployable SaaS starter kit** you can actually push to GitHub and run.
+Alright — we’ll build a **working MVP Commerce AI Hiring System** (not just design). This will be a clean, real project you can run locally and later deploy.
+
+We’ll keep it tight but production-shaped.
+
+---
+
+# 🚀 COMMERCE AI HIRING SYSTEM (MVP BUILD)
+
+## 🧱 What you will get
+
+✔ Upload CV (PDF/DOCX)
+✔ AI extracts commerce skills
+✔ AI scores candidate (0–100)
+✔ Matches job role (Accountant, Auditor, Sales, etc.)
+✔ HR dashboard with ranking
+
+---
+
+# 📁 1. PROJECT STRUCTURE
+
+```text id="m1"
+commerce-ai-system/
+│
+├── frontend/
+│   ├── src/
+│   │   ├── App.jsx
+│   │   └── components/
+│   │       ├── Upload.jsx
+│   │       └── Dashboard.jsx
+│
+├── backend/
+│   ├── routes/
+│   │   └── candidates.js
+│   ├── services/
+│   │   ├── ai.js
+│   │   └── parser.js
+│   ├── server.js
+│   └── .env
+```
+
+---
+
+# ⚙️ 2. BACKEND SETUP
+
+## Install
+
+```bash id="m2"
+mkdir backend
+cd backend
+npm init -y
+
+npm install express cors multer dotenv pdf-parse mammoth openai
+npm install nodemon -D
+```
+
+---
+
+## server.js
+
+```javascript id="m3"
+const express = require("express");
+const cors = require("cors");
+
+const candidateRoutes = require("./routes/candidates");
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
+app.use("/api/candidates", candidateRoutes);
+
+app.listen(3000, () => {
+  console.log("Commerce AI running on port 3000");
+});
+```
+
+---
+
+# 📄 3. RESUME PARSER
+
+## services/parser.js
+
+```javascript id="m4"
+const pdf = require("pdf-parse");
+const mammoth = require("mammoth");
+
+async function extractText(file) {
+  const name = file.originalname.toLowerCase();
+
+  if (name.endsWith(".pdf")) {
+    const data = await pdf(file.buffer);
+    return data.text;
+  }
+
+  if (name.endsWith(".docx")) {
+    const data = await mammoth.extractRawText({
+      buffer: file.buffer
+    });
+    return data.value;
+  }
+
+  throw new Error("Unsupported file type");
+}
+
+module.exports = { extractText };
+```
+
+---
+
+# 🧠 4. COMMERCE AI ENGINE (CORE)
+
+## services/ai.js
+
+```javascript id="m5"
+const OpenAI = require("openai");
+
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
+
+async function analyzeCommerceResume(text, jobRole) {
+  const prompt = `
+You are a Commerce Department recruitment AI.
+
+Evaluate this candidate for role: ${jobRole}
+
+Focus on:
+- Accounting skills
+- Finance knowledge
+- Business/Admin skills
+- Tools like Excel, ERP, SAP
+- Certifications (ICAN, ACCA, CFA)
+
+Resume:
+${text}
+
+Return ONLY JSON:
+
+{
+  "name": "",
+  "skills": [],
+  "experienceYears": 0,
+  "certifications": [],
+  "score": 0,
+  "recommendation": "",
+  "summary": "",
+  "riskFlags": []
+}
+
+Scoring:
+0-40 Reject
+41-65 Weak
+66-80 Interview
+81-100 Strong Hire
+`;
+
+  const res = await client.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0.2
+  });
+
+  return JSON.parse(res.choices[0].message.content);
+}
+
+module.exports = { analyzeCommerceResume };
+```
+
+---
+
+# 📦 5. MAIN ROUTE
+
+## routes/candidates.js
+
+```javascript id="m6"
+const express = require("express");
+const multer = require("multer");
+
+const { extractText } = require("../services/parser");
+const { analyzeCommerceResume } = require("../services/ai");
+
+const router = express.Router();
+
+const upload = multer({ storage: multer.memoryStorage() });
+
+let candidates = [];
+
+router.post("/upload", upload.single("resume"), async (req, res) => {
+  try {
+    const text = await extractText(req.file);
+
+    const ai = await analyzeCommerceResume(
+      text,
+      req.body.jobRole
+    );
+
+    const candidate = {
+      id: Date.now(),
+      name: ai.name,
+      jobRole: req.body.jobRole,
+      score: ai.score,
+      recommendation: ai.recommendation,
+      summary: ai.summary,
+      skills: ai.skills
+    };
+
+    candidates.push(candidate);
+
+    res.json({ success: true, candidate });
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get("/", (req, res) => {
+  const sorted = [...candidates].sort((a, b) => b.score - a.score);
+  res.json(sorted);
+});
+
+module.exports = router;
+```
+
+---
+
+# 🔐 6. ENV FILE
+
+## backend/.env
+
+```env id="m7"
+OPENAI_API_KEY=your_key_here
+```
+
+---
+
+# 💻 7. FRONTEND (REACT)
+
+## Create app
+
+```bash id="m8"
+npm create vite@latest frontend -- --template react
+cd frontend
+npm install
+```
+
+---
+
+## App.jsx
+
+```javascript id="m9"
+import { useState, useEffect } from "react";
+
+const API = "http://localhost:3000";
+
+export default function App() {
+  const [file, setFile] = useState(null);
+  const [role, setRole] = useState("Accountant");
+  const [data, setData] = useState([]);
+
+  async function upload() {
+    const form = new FormData();
+    form.append("resume", file);
+    form.append("jobRole", role);
+
+    await fetch(`${API}/api/candidates/upload`, {
+      method: "POST",
+      body: form
+    });
+
+    load();
+  }
+
+  async function load() {
+    const res = await fetch(`${API}/api/candidates`);
+    setData(await res.json());
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  return (
+    <div style={{ padding: 20 }}>
+      <h1>Commerce AI Hiring System</h1>
+
+      <select onChange={(e) => setRole(e.target.value)}>
+        <option>Accountant</option>
+        <option>Auditor</option>
+        <option>Sales Executive</option>
+        <option>Business Analyst</option>
+      </select>
+
+      <br /><br />
+
+      <input type="file" onChange={(e) => setFile(e.target.files[0])} />
+
+      <button onClick={upload}>Analyze Candidate</button>
+
+      <h2>Ranked Candidates</h2>
+
+      <table border="1" cellPadding="10">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Role</th>
+            <th>Score</th>
+            <th>Recommendation</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {data.map((c) => (
+            <tr key={c.id}>
+              <td>{c.name}</td>
+              <td>{c.jobRole}</td>
+              <td>{c.score}</td>
+              <td>{c.recommendation}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+```
+
+---
+
+# 🚀 8. RUN SYSTEM
+
+## Backend
+
+```bash id="m10"
+cd backend
+npm run dev
+```
+
+## Frontend
+
+```bash id="m11"
+cd frontend
+npm run dev
+```
+
+---
+
+# 🎯 WHAT YOU NOW HAVE
+
+You now built:
+
+## ✔ Commerce AI Hiring System
+
+* Resume upload
+* AI commerce skill evaluation
+* ICAN/ACCA-aware scoring
+* Role matching (Accountant, Auditor, etc.)
+* Candidate ranking dashboard
+
+---
+
+# 🧠 WHAT THIS SYSTEM IS
+
+This is a:
+
+> 🚀 Domain-specific AI Recruitment System for Commerce Departments
+
+It understands:
+
+* Finance
+* Accounting
+* Business roles
+* Certifications
+* ERP tools
+
+---
+
+# 🚀 NEXT LEVEL (IF YOU WANT)
+
+I can upgrade this into:
+
+### 👉 Production SaaS version
+
+* PostgreSQL database
+* Login system for HR
+* Multi-company support
+* Azure deployment
+* Interview generator
+* Fraud detection AI
+* Salary recommendation AI
+
+Just say:
+
+👉 **upgrade to saas**
+
+and I’ll turn this into a **real startup-ready AI hiring platform**.
+
 
 This is a **production-ready skeleton** (not just concept code anymore).
 
