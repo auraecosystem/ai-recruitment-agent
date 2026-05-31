@@ -26,3 +26,4 @@ CREATE TABLE candidates (
   status TEXT,
   created_at TIMESTAMP DEFAULT NOW()
 );
+
